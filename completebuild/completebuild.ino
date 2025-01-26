@@ -106,8 +106,8 @@ unsigned long pPotTime[N_POTS] = { 0 };
 unsigned long potTimer[N_POTS] = { 0 };
 
 // Wheel Variables
-byte wheelPin = 5;
-int wheelStateButton = 6;
+byte wheelPin = 5; // Analog input reading of wheel
+int wheelStateButton = 6; // This button causes the wheel to act, either as the pitch wheel or mod wheel.
 byte wheelState = 0;
 
 // Modulation Wheel Variables
