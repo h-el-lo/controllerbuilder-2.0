@@ -1,7 +1,9 @@
 // WORKING SINGLE C0 (midi note 24) NOTEON NOTEOFF, VELOCITY SENSITIVE
 // DOUBLE MUX SINGLE KEY
 
-#include <MIDIUSB.h>
+#include <Adafruit_TinyUSB_MIDI.h>
+
+Adafruit_TinyUSB_MIDI MIDI;
 
 int col = 0;
 int kps = 0;  // Mux
@@ -30,7 +32,7 @@ bool not_ready = 0;
 
 // TIMER VARIABLES
 unsigned long timer[2] = { 0 };
-int time;
+int time_taken;
 
 int vel_min = 0;
 int vel_max = 50;
@@ -40,11 +42,28 @@ int vel;
 const int channel = 0; // Midi channel 1
 int note = 24; // Midi note
 
+// ======================================================
+void mux_ch(int channel) {
+  digitalWrite(S10, channel & 0x01);
+  digitalWrite(S11, (channel >> 1) & 0x01);
+  digitalWrite(S12, (channel >> 2) & 0x01);
+  digitalWrite(S13, (channel >> 3) & 0x01);
+}
+
+void mux2_ch(int channel) {
+  digitalWrite(S20, channel & 0x01);
+  digitalWrite(S21, (channel >> 1) & 0x01);
+  digitalWrite(S22, (channel >> 2) & 0x01);
+  digitalWrite(S23, (channel >> 3) & 0x01);
+}
+// ======================================================
+
 
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(9600);
-  // put your setup code here, to run once:
+  MIDI.begin();
+  
   pinMode(S10, OUTPUT);
   pinMode(S11, OUTPUT);
   pinMode(S12, OUTPUT);
@@ -107,11 +126,11 @@ void loop() {
 
 
   if (pressed) {
-    time = abs(int(timer[1] - timer[0]));
+    time_taken = abs(int(timer[1] - timer[0]));
     Serial.print("The result of the calculation is: ");
-    Serial.println(time);
-    vel = map(constrain(time, vel_min, vel_max), vel_max, vel_min, 10, 127);
-    noteOn(channel, note, vel);
+    Serial.println(time_taken);
+    vel = map(constrain(time_taken, vel_min, vel_max), vel_max, vel_min, 10, 127);
+    MIDI.sendNoteOn(note, vel, channel);
     KPS = 0;
     KPE = 0;
     pressed = 0;
@@ -128,7 +147,7 @@ void loop() {
 
     digitalWrite(signal, HIGH);
     if (!KPS && !KPE) {
-      noteOff(channel, note, vel);
+      MIDI.sendNoteOff(note, vel, channel);
       not_ready = 0;
       // Serial.println("Ready!");
     }
@@ -140,28 +159,3 @@ void loop() {
   }
 }
 
-void mux_ch(int channel) {
-  digitalWrite(S10, channel & 0x01);
-  digitalWrite(S11, (channel >> 1) & 0x01);
-  digitalWrite(S12, (channel >> 2) & 0x01);
-  digitalWrite(S13, (channel >> 3) & 0x01);
-}
-
-void mux2_ch(int channel) {
-  digitalWrite(S20, channel & 0x01);
-  digitalWrite(S21, (channel >> 1) & 0x01);
-  digitalWrite(S22, (channel >> 2) & 0x01);
-  digitalWrite(S23, (channel >> 3) & 0x01);
-}
-
-void noteOn(byte channel, byte note, byte velocity) {
-  midiEventPacket_t event = { 0x09, 0x90 | channel, note, velocity };
-  MidiUSB.sendMIDI(event);
-  MidiUSB.flush();
-}
-
-void noteOff(byte channel, byte note, byte velocity) {
-  midiEventPacket_t noteOff = { 0x08, 0x80 | channel, note, velocity };
-  MidiUSB.sendMIDI(noteOff);
-  MidiUSB.flush();
-}

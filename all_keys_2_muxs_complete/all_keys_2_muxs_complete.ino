@@ -1,21 +1,31 @@
 // WORKING ALL KEYS NOTEON, NOTE OFF, VELOCITY SENSITIVE
-// 64 KEYS, SINGLE MUX
+// ALL KEYS, TWO MUXES
+#include <Adafruit_TinyUSB_MIDI.h>
 
-#include <MIDIUSB.h>
+Adafruit_TinyUSB_MIDI MIDI;
 
 // KEYSCAN MATRIX VARIABLES
 const int COL_NUM = 8;
 const int ROW_NUM = 8;
 
-int cols[COL_NUM] = { 9, 8, 7, 6, 5, 4, 3, 2 };       // Blue cols, input_pullup
+int cols[COL_NUM] = { 0, 1, 2, 3, 4, 5, 6, 7 };       // Blue cols, input_pullup
 int KPS[ROW_NUM] = { 0, 1, 2, 3, 4, 5, 6, 7 };        // Brown rows (mux 0 - 7), output
 int KPE[ROW_NUM] = { 8, 9, 10, 11, 12, 13, 14, 15 };  // White rows (mux 8 - 15), output
 
-int S0 = 15;
-int S1 = 14;
-int S2 = 16;
-int S3 = 10;
-const int signal_pin = A0;
+// Mux 1 (Outputs (keys), KPS AND KPE (rows))
+int S10 = 15;
+int S11 = 14;
+int S12 = 16;
+int S13 = 10;
+const int signal = A0;
+
+// Mux 2 (Inputs (keys) (columns)) digital
+int S20 = 9;
+int S21 = 8;
+int S22 = 7;
+int S23 = 6;
+const int signal2 = A1;
+
 
 // Array to keep track of previous states of kps and kpe data for all keys
 int pState[2][ROW_NUM][COL_NUM] = { 0 };  // pState[2] for kps[x][y] and kpe[x][y]
@@ -35,7 +45,7 @@ bool not_ready[ROW_NUM][COL_NUM] = { 0 };
 
 // TIMER VARIABLES
 unsigned long timer[2][ROW_NUM][COL_NUM] = { 0 };  // timer[2] for kps[x][y] and kpe[x][y]
-int time;
+int time_taken;
 
 // MIDI VARIABLES
 const int channel = 0;
@@ -82,22 +92,54 @@ String noteNames[ROW_NUM][COL_NUM] = {
   { "G#5", "A5", "A#5", "B5", "C6", "C#6", "D6", "D#6" }
 };
 
+// =======================================================
+void mux_ch(int channel) {
+  digitalWrite(S10, channel & 0x01);
+  digitalWrite(S11, (channel >> 1) & 0x01);
+  digitalWrite(S12, (channel >> 2) & 0x01);
+  digitalWrite(S13, (channel >> 3) & 0x01);
+}
+
+void mux2_ch(int channel) {
+  digitalWrite(S20, channel & 0x01);
+  digitalWrite(S21, (channel >> 1) & 0x01);
+  digitalWrite(S22, (channel >> 2) & 0x01);
+  digitalWrite(S23, (channel >> 3) & 0x01);
+}
+
+void serialNoteOn(int channel, int note, int time_taken, int velocity) {
+  Serial.print("Channel: ");
+  Serial.print(channel + 1);
+  Serial.print(", ");
+  Serial.print("Note: ");
+  Serial.print(note);
+  Serial.print(", ");
+  Serial.print("Time: ");
+  Serial.print(time_taken);
+  Serial.print(", ");
+  Serial.print("Velocity: ");
+  Serial.println(velocity);
+}
+// ===========================================================
 
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(9600);
 
-  pinMode(S0, OUTPUT);
-  pinMode(S1, OUTPUT);
-  pinMode(S2, OUTPUT);
-  pinMode(S3, OUTPUT);
+  pinMode(S10, OUTPUT);
+  pinMode(S11, OUTPUT);
+  pinMode(S12, OUTPUT);
+  pinMode(S13, OUTPUT);
+  pinMode(signal, OUTPUT);
+  digitalWrite(signal, HIGH);
 
-  for (int j = 0; j < ROW_NUM; j++) {
-    pinMode(cols[j], INPUT_PULLUP);
-  }
+  pinMode(S20, OUTPUT);
+  pinMode(S21, OUTPUT);
+  pinMode(S22, OUTPUT);
+  pinMode(S23, OUTPUT);
+  pinMode(signal2, INPUT_PULLUP);
 
-  pinMode(signal_pin, OUTPUT);
-  digitalWrite(signal_pin, HIGH);
+  MIDI.begin();
 }
 
 void loop() {
@@ -112,17 +154,23 @@ void loop() {
 
       note = nums[x][y];
 
+
       if (!not_ready[x][y]) {
 
         // Shift mux to Keypress-start (KPS) channel and read the digital input of note[x][y]
         mux_ch(KPS[x]);
-        digitalWrite(signal_pin, LOW);
-        temp = !digitalRead(cols[y]);
-        digitalWrite(signal_pin, HIGH);
+        digitalWrite(signal, LOW);
+        mux2_ch(cols[y]);
+        temp = !digitalRead(signal2);
+        digitalWrite(signal, HIGH);
 
         if (temp != pState[0][x][y]) {
           if (temp == 1) {
             timer[0][x][y] = millis();
+            Serial.print("Time started (key ");
+            Serial.print(noteNames[x][y]);
+            Serial.print("): ");
+            Serial.print(timer[0][x][y]);
             kps[x][y] = 1;
             pState[0][x][y] = temp;
           } else {
@@ -134,13 +182,18 @@ void loop() {
 
         // Shift mux to Keypress-end (KPE) channel and read the digital input of note[x][y]
         mux_ch(KPE[x]);
-        digitalWrite(signal_pin, LOW);
-        temp = !digitalRead(cols[y]);
-        digitalWrite(signal_pin, HIGH);
+        digitalWrite(signal, LOW);
+        mux2_ch(cols[y]);
+        temp = !digitalRead(signal2);
+        digitalWrite(signal, HIGH);
 
         if (temp != pState[1][x][y]) {
           if (temp == 1) {
             timer[1][x][y] = millis();
+            Serial.print(", Time ended (key ");
+            Serial.print(noteNames[x][y]);
+            Serial.print("): ");
+            Serial.println(timer[1][x][y]);
             kpe[x][y] = 1;
             pState[1][x][y] = temp;
           } else {
@@ -159,10 +212,12 @@ void loop() {
 
       // Sends a noteOn midi message when keypress is complete
       if (pressed[x][y]) {
-        time = abs(int(timer[1][x][y] - timer[0][x][y]));
-        vel = constrain(time, vel_min, vel_max);
+        time_taken = abs(int(timer[1][x][y] - timer[0][x][y]));
+        Serial.print("Total time taken: ");
+        Serial.println(time_taken);
+        vel = constrain(time_taken, vel_min, vel_max);
         velocity = map(vel, vel_max, vel_min, 10, 127);
-        noteOn(0, note, velocity);
+        MIDI.sendNoteOn(note, velocity, channel);
         // serialNoteOn(channel, note, time, velocity);
 
         pressed[x][y] = 0;
@@ -171,65 +226,21 @@ void loop() {
       if (not_ready[x][y]) {
 
         mux_ch(KPS[x]);
-        digitalWrite(signal_pin, LOW);
-        kps[x][y] = !digitalRead(cols[y]);
+        digitalWrite(signal, LOW);
+        mux2_ch(cols[y]);
+        kps[x][y] = !digitalRead(signal2);
 
         mux_ch(KPE[x]);
-        digitalWrite(signal_pin, LOW);
-        kpe[x][y] = !digitalRead(cols[y]);
+        digitalWrite(signal, LOW);
+        mux2_ch(cols[y]);
+        kpe[x][y] = !digitalRead(signal2);
 
-        digitalWrite(signal_pin, HIGH);
+        digitalWrite(signal, HIGH);
         if (!kps[x][y] && !kpe[x][y]) {
-          noteOff(0, note, velocity);
+          MIDI.sendNoteOff(note, velocity, channel);
           not_ready[x][y] = 0;
         }
       }
     }
   }
-}
-
-
-void mux_ch(int channel) {
-  digitalWrite(S0, channel & 0x01);
-  digitalWrite(S1, (channel >> 1) & 0x01);
-  digitalWrite(S2, (channel >> 2) & 0x01);
-  digitalWrite(S3, (channel >> 3) & 0x01);
-}
-
-void noteOn(byte channel, byte note, byte velocity) {
-  midiEventPacket_t event = { 0x09, 0x90 | channel, note, velocity };
-  MidiUSB.sendMIDI(event);
-  MidiUSB.flush();
-}
-
-void noteOff(byte channel, byte note, byte velocity) {
-  midiEventPacket_t noteOff = { 0x08, 0x80 | channel, note, velocity };
-  MidiUSB.sendMIDI(noteOff);
-  MidiUSB.flush();
-}
-
-void controlChange(byte channel, byte control, byte value) {
-  midiEventPacket_t event = { 0x0B, 0xB0 | channel, control, value };
-  MidiUSB.sendMIDI(event);
-  MidiUSB.flush();
-}
-
-void pitchBend(byte channel, int value) {
-  midiEventPacket_t pitchBend = { 0x0E, 0xE0 | channel, value & 0x7F, (value >> 7) & 0x7F };
-  MidiUSB.sendMIDI(pitchBend);
-  MidiUSB.flush();
-}
-
-void serialNoteOn(int channel, int note, int time, int velocity) {
-  Serial.print("Channel: ");
-  Serial.print(channel + 1);
-  Serial.print(", ");
-  Serial.print("Note: ");
-  Serial.print(note);
-  Serial.print(", ");
-  Serial.print("Time: ");
-  Serial.print(time);
-  Serial.print(", ");
-  Serial.print("Velocity: ");
-  Serial.println(velocity);
 }
