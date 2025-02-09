@@ -1,6 +1,8 @@
 // WORKING ALL KEYS NOTEON, NOTE OFF, VELOCITY SENSITIVE
 // ALL KEYS, 3 MUXS, PEDAL
-#include <Adafruit_TinyUSB_MIDI.h>
+
+#include <BLEMIDI_Transport.h>
+#include <hardware/BLEMIDI_ESP32.h>
 
 Adafruit_TinyUSB_MIDI MIDI;
 
