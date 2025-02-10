@@ -1,4 +1,5 @@
-#if ARDUINO_USB_MODE
+// WORKING ALL KEYS NOTEON, NOTE OFF, VELOCITY SENSITIVE
+// ALL KEYS, 3 MUXS, PEDAL#if ARDUINO_USB_MODE
 
 #warning This sketch should be used when USB is in OTG mode
 
@@ -6,13 +7,7 @@ void setup() {}
 void loop() {}
 
 #else
-// Possible project needs
-// voltage sensor, usbc female, 18650 charging module with 5v output
-// possibly 3v3 regulator
 
-
-// WORKING ALL KEYS NOTEON, NOTE OFF, VELOCITY SENSITIVE
-// ALL KEYS, 3 MUXS, PEDAL
 #include <BLEMIDI_Transport.h>
 #include <hardware/BLEMIDI_ESP32.h>
 
