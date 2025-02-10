@@ -1,18 +1,28 @@
 // WORKING ALL KEYS NOTEON, NOTE OFF, VELOCITY SENSITIVE
 // ALL KEYS, 3 MUXS, PEDAL
 
-#include <BLEMIDI_Transport.h>
-#include <hardware/BLEMIDI_ESP32.h>
+#if ARDUINO_USB_MODE
+#warning This sketch should be used when USB is in OTG mode
 
-Adafruit_TinyUSB_MIDI MIDI;
+void setup() {}
+void loop() {}
 
-// ===================  MUX VARIABLES  ======================
+#else
+
+#include "USB.h"
+#include "USBMIDI.h"
+
+
+// =================== MUX VARIABLES  ======================
 // Mux 1 (Outputs (keys), KPS AND KPE (rows))
 #define S10 15
 #define S11 14
 #define S12 16
 #define S13 10
-#define signal A0
+// The "signal" variable is renamed to "signal1" in the ESP version
+// This is because there is a keyword named "signal" in the "USB.h" library.
+// Proceeding to use this same word will cause a conflict.
+#define signal1 A0
 
 // Mux 2 (Inputs (keys) (columns)) digital
 #define S20 9
@@ -48,7 +58,7 @@ int kpe[ROW_NUM][COL_NUM] = { 0 };
 bool pressed[ROW_NUM][COL_NUM] = { 0 };
 
 // The "not_ready[x][y]" variable name is used here because using "ready[x][y] = 1" would
-// set just ready[0][0] to "1", and all other elements to "0". The logic is then negated
+// set just ready[0][0] to "1", and all other elements to "0". The logic is then inverted
 // in variable naming and assignment to "0" instead. This way, one saves the stress of
 // having to hardcode the array, giving flexibility when modifying the program.
 
@@ -57,14 +67,14 @@ bool not_ready[ROW_NUM][COL_NUM] = { 0 };
 
 // TIMER VARIABLES
 unsigned long timer[2][ROW_NUM][COL_NUM] = { 0 };  // timer[2] for kps[x][y] and kpe[x][y]
-int time_taken;
+int timing;
 //  ===========================================================================
 
 
 // ============================  MIDI VARIABLES  =============================
 const int channel = 0;
 int note, vel, velocity;
-int vel_min = 1;
+int vel_min = 0;
 int vel_max = 50;
 
 
@@ -80,7 +90,7 @@ int nums[ROW_NUM][COL_NUM] = {
   { 80, 81, 82, 83, 84, 85, 86, 87 },
 };
 
-int transpose = 12;
+USBMIDI usbmidi;
 // ==========================================================
 
 
@@ -92,8 +102,8 @@ int analogPins[N_ANALOGS] = { 0, 1, 2, 3, 4 };  // (Mux3 0 - 7) input_pullup
 
 // Potentiometer Variables
 const int N_POTS = 5;
-int potPin[N_POTS] = { 0, 1, 2, 3, 4 };  // (Mux3 0 - 7) input_pullup
-int potCC[N_POTS] = { 27, 26, 25, 24, 7 };
+int potPin[N_POTS] = { 7, 1, 2, 3, 4 };  // (Mux3 0 - 7) input_pullup
+int potCC[N_POTS] = { 24, 25, 26, 27, 7 };
 
 int potReading[N_POTS] = { 0 };
 int potState[N_POTS] = { 0 };
@@ -108,8 +118,8 @@ unsigned long pPotTime[N_POTS] = { 0 };
 unsigned long potTimer[N_POTS] = { 0 };
 
 // Wheel Variables
-byte wheelPin = 5; // Analog input reading of wheel
-int wheelStateButton = 6; // This button causes the wheel to act, either as the pitch wheel or mod wheel.
+byte wheelPin = 5;         // Analog input reading of wheel
+int wheelStateButton = 6;  // This button causes the wheel to act, either as the pitch wheel or mod wheel.
 byte wheelState = 0;
 
 // Modulation Wheel Variables
@@ -133,11 +143,180 @@ byte pitchThreshold = 3;
 // =========================================================================
 
 // =====================  SUSTAIN PEDAL VARIABLES  =========================
-int sustainPin = 5;  // Mux3, ch7
+int sustainPin = 0;  // Mux3, ch7
 int susState = 0;
 int susPrevState = 0;
 
-// ==============================  USER FUNCTIONS  ================================
+
+void setup() {
+  // put your setup code here, to run once:
+  pinMode(S10, OUTPUT);
+  pinMode(S11, OUTPUT);
+  pinMode(S12, OUTPUT);
+  pinMode(S13, OUTPUT);
+  pinMode(signal1, OUTPUT);
+  digitalWrite(signal1, HIGH);
+
+  pinMode(S20, OUTPUT);
+  pinMode(S21, OUTPUT);
+  pinMode(S22, OUTPUT);
+  pinMode(S23, OUTPUT);
+  pinMode(signal2, INPUT_PULLUP);
+
+  pinMode(S30, OUTPUT);
+  pinMode(S31, OUTPUT);
+  pinMode(S32, OUTPUT);
+  pinMode(S33, OUTPUT);
+  pinMode(signal3, INPUT_PULLUP);
+
+  USB.begin();
+  usbmidi.begin();  // USB MIDI INSTANCE
+}
+
+void loop() {
+
+  // ==============================  READ THROUGH THE KEYS  ===============================
+  for (int y = 0; y < COL_NUM; y++) {
+
+    for (int x = 0; x < ROW_NUM; x++) {
+
+      note = nums[x][y];
+      // if the selected note "nums[x][y]" is ready to be pressed, i.e, !not_ready
+      if (!not_ready[x][y]) {
+
+        // Shift mux to Keypress-start (KPS) channel and read the digital input of note[x][y]
+        mux_ch(KPS[x]);
+        digitalWrite(signal1, LOW);
+        mux2_ch(cols[y]);
+        temp = !digitalRead(signal2);
+        digitalWrite(signal1, HIGH);
+
+        // if change recorded in kps of note
+        if (temp != pState[0][x][y]) {
+          if (temp == 1) {
+            // begin a timer for the note, and re-record new state in
+            timer[0][x][y] = millis();
+            kps[x][y] = 1;
+            pState[0][x][y] = temp;
+          } else {
+            timer[0][x][y] = 0;
+            kps[x][y] = 0;
+            pState[0][x][y] = temp;
+          }
+        }
+
+        // Shift mux to Keypress-end (KPE) channel and read the digital input of note[x][y]
+        mux_ch(KPE[x]);
+        digitalWrite(signal1, LOW);
+        mux2_ch(cols[y]);
+        temp = !digitalRead(signal2);
+        digitalWrite(signal1, HIGH);
+
+        if (temp != pState[1][x][y]) {
+          if (temp == 1) {
+            timer[1][x][y] = millis();
+            kpe[x][y] = 1;
+            pState[1][x][y] = temp;
+          } else {
+            timer[1][x][y] = 0;
+            kpe[x][y] = 0;
+            pState[1][x][y] = temp;
+          }
+        }
+
+        if (kps[x][y] && kpe[x][y]) {
+          // Declare key[x][y] as "pressed" and not ready to read another keypress
+          pressed[x][y] = 1;
+          not_ready[x][y] = 1;
+        }
+      }
+
+      // Sends a noteOn midi message when keypress is complete
+      if (pressed[x][y]) {
+        timing = abs(int(timer[1][x][y] - timer[0][x][y]));
+        vel = constrain(timing, vel_min, vel_max);
+        velocity = map(vel, vel_max, vel_min, 10, 127);
+        uNoteOn(channel, note, velocity);
+        pressed[x][y] = 0;
+      }
+
+      if (not_ready[x][y]) {
+
+        mux_ch(KPS[x]);
+        digitalWrite(signal1, LOW);
+        mux2_ch(cols[y]);
+        kps[x][y] = !digitalRead(signal2);
+
+        mux_ch(KPE[x]);
+        digitalWrite(signal1, LOW);
+        mux2_ch(cols[y]);
+        kpe[x][y] = !digitalRead(signal2);
+
+        digitalWrite(signal1, HIGH);
+        if (!kps[x][y] && !kpe[x][y]) {
+          uNoteOff(channel, note, velocity);
+          not_ready[x][y] = 0;
+        }
+      }
+    }
+  }
+  // =======================================================================================
+
+
+  // ============  READ THROUGH ALL POTS MINUS PITCH AND MOD WHEELS  =====================
+  for (int i = 0; i < N_POTS; i++) {
+
+    mux3_ch(potPin[i]);
+    potReading[i] = analogRead(signal3);
+    potState[i] = potReading[i];
+    midiState[i] = map(potState[i], 0, 1023, 0, 127);
+
+    int potVar = abs(potState[i] - potPState[i]);
+
+    if (potVar > potThreshold) {
+      pPotTime[i] = millis();
+    }
+
+    potTimer[i] = millis() - pPotTime[i];
+
+    if (potTimer[i] < POT_TIMEOUT) {
+      if (midiState[i] != midiPState[i]) {
+        uControlChange(channel, potCC[i], midiState[i]);
+        midiPState[i] = midiState[i];
+      }
+      potPState[i] = potState[i];
+    }
+  }
+  // ========================================================================================
+
+
+  // // =============================  READ THE PITCH/MOD WHEEL  ==============================
+  // mux3_ch(wheelStateButton);
+  // wheelState = !digitalRead(signal3);
+
+  // if (!wheelState) {
+  //   mod_wheel();
+  // } else {
+  //   pitch_wheel();
+  // }
+  // // =======================================================================================
+
+
+  // Sustain Pedal
+  //=========================================================
+  mux3_ch(sustainPin);
+  int susRead = !digitalRead(signal3);
+  int susState = map(susRead, 0, 1, 0, 127);
+
+  if (susState != susPrevState) {
+    uControlChange(channel, 64, susState);
+    susPrevState = susState;
+    // delay(5);
+  }
+  //==========================================================
+}
+
+
 void mux_ch(int channel) {
   digitalWrite(S10, channel & 0x01);
   digitalWrite(S11, (channel >> 1) & 0x01);
@@ -157,6 +336,26 @@ void mux3_ch(int channel) {
   digitalWrite(S31, (channel >> 1) & 0x01);
   digitalWrite(S32, (channel >> 2) & 0x01);
   digitalWrite(S33, (channel >> 3) & 0x01);
+}
+
+void uNoteOn(byte channel, byte note, byte velocity) {
+  usbmidi.noteOn(note, velocity, channel);
+}
+
+void uNoteOff(byte channel, byte note, byte velocity) {
+  usbmidi.noteOff(note, velocity, channel);
+}
+
+void uControlChange(byte channel, byte control, byte value) {
+  usbmidi.controlChange(control, value, channel);
+}
+
+// The generic "int" or "byte" data types cannot be used here to represent values greater than 256 ()
+// this is because it comprises of just 8 bits, with a max possible permutation of 256 (2**8)
+// Thus, we must explicitly specicy to use the 16 bits variant (int16_t or uint16_t) to represent
+// a range of 0 - 16383 or -8192 to 8191. (2**14)
+void uPitchBend(int16_t value, int channel) {
+  usbmidi.pitchBend(value, channel);
 }
 
 void mod_wheel() {
@@ -185,10 +384,10 @@ void mod_wheel() {
         if (modMidiState != modMidiPState) {
           if (modMidiState >= 0) {
             // Send Modulation coarse (CC 1)
-            MIDI.sendControlChange(1, modMidiState, channel);
+            uControlChange(channel, 1, modMidiState);
           } else {
             // Send modulation LSB fine/smooth (CC 33)
-            MIDI.sendControlChange(33, abs(modMidiState), channel);
+            uControlChange(channel, 33, abs(modMidiState));
           }
           modMidiPState = modMidiState;
         }
@@ -211,177 +410,12 @@ void pitch_wheel() {
   if (pitchVar > pitchThreshold) {
 
     if (pitchMidiState != pitchMidiPState) {
-      MIDI.sendPitchBend(pitchMidiState, channel);
+      uPitchBend(pitchMidiState, channel);
       pitchPrevState = pitchState;
       // delay(5);
     }
     pitchMidiPState = pitchMidiState;
   }
 }
-// ===========================================================================
 
-void setup() {
-  // put your setup code here, to run once:
-  pinMode(S10, OUTPUT);
-  pinMode(S11, OUTPUT);
-  pinMode(S12, OUTPUT);
-  pinMode(S13, OUTPUT);
-  pinMode(signal, OUTPUT);
-  digitalWrite(signal, HIGH);
-
-  pinMode(S20, OUTPUT);
-  pinMode(S21, OUTPUT);
-  pinMode(S22, OUTPUT);
-  pinMode(S23, OUTPUT);
-  pinMode(signal2, INPUT_PULLUP);
-
-  pinMode(S30, OUTPUT);
-  pinMode(S31, OUTPUT);
-  pinMode(S32, OUTPUT);
-  pinMode(S33, OUTPUT);
-  pinMode(signal3, INPUT_PULLUP);
-
-  MIDI.begin();
-}
-
-void loop() {
-
-  // ==============================  READ THROUGH THE KEYS  ================================
-  for (int y = 0; y < COL_NUM; y++) {
-
-    for (int x = 0; x < ROW_NUM; x++) {
-
-      note = nums[x][y] + transpose;
-
-      if (!not_ready[x][y]) {
-
-        // Shift mux to Keypress-start (KPS) channel and read the digital input of note[x][y]
-        mux_ch(KPS[x]);
-        digitalWrite(signal, LOW);
-        mux2_ch(cols[y]);
-        temp = !digitalRead(signal2);
-        digitalWrite(signal, HIGH);
-
-        if (temp != pState[0][x][y]) {
-          if (temp == 1) {
-            timer[0][x][y] = millis();
-            kps[x][y] = 1;
-            pState[0][x][y] = temp;
-          } else {
-            timer[0][x][y] = 0;
-            kps[x][y] = 0;
-            pState[0][x][y] = temp;
-          }
-        }
-
-        // Shift mux to Keypress-end (KPE) channel and read the digital input of note[x][y]
-        mux_ch(KPE[x]);
-        digitalWrite(signal, LOW);
-        mux2_ch(cols[y]);
-        temp = !digitalRead(signal2);
-        digitalWrite(signal, HIGH);
-
-        if (temp != pState[1][x][y]) {
-          if (temp == 1) {
-            timer[1][x][y] = millis();
-            kpe[x][y] = 1;
-            pState[1][x][y] = temp;
-          } else {
-            timer[1][x][y] = 0;
-            kpe[x][y] = 0;
-            pState[1][x][y] = temp;
-          }
-        }
-
-        if (kps[x][y] && kpe[x][y]) {
-          // Declare key[x][y] as "pressed" and not ready to read another keypress
-          pressed[x][y] = 1;
-          not_ready[x][y] = 1;
-        }
-      }
-
-      // Sends a noteOn midi message when keypress is complete
-      if (pressed[x][y]) {
-        time_taken = abs(int(timer[1][x][y] - timer[0][x][y]));
-        vel = constrain(time_taken, vel_min, vel_max);
-        velocity = map(vel, vel_max, vel_min, 10, 127);
-        MIDI.sendNoteOn(note, velocity, channel);
-        pressed[x][y] = 0;
-
-
-        if (not_ready[x][y]) {
-
-          mux_ch(KPS[x]);
-          digitalWrite(signal, LOW);
-          mux2_ch(cols[y]);
-          kps[x][y] = !digitalRead(signal2);
-
-          mux_ch(KPE[x]);
-          digitalWrite(signal, LOW);
-          mux2_ch(cols[y]);
-          kpe[x][y] = !digitalRead(signal2);
-
-          digitalWrite(signal, HIGH);
-          if (!kps[x][y] && !kpe[x][y]) {
-            MIDI.sendNoteOff(note, velocity, channel);
-            not_ready[x][y] = 0;
-          }
-        }
-      }
-    }
-    // =======================================================================================
-
-
-    // ==============  READ THROUGH ALL POTS MINUS PITCH AND MOD WHEELS  =====================
-    for (int i = 0; i < N_POTS; i++) {
-
-      mux3_ch(potPin[i]);
-      potReading[i] = analogRead(signal3);
-      potState[i] = potReading[i];
-      midiState[i] = map(potState[i], 0, 1023, 127, 0);
-
-      int potVar = abs(potState[i] - potPState[i]);
-
-      if (potVar > potThreshold) {
-        pPotTime[i] = millis();
-      }
-
-      potTimer[i] = millis() - pPotTime[i];
-
-      if (potTimer[i] < POT_TIMEOUT) {
-        if (midiState[i] != midiPState[i]) {
-          MIDI.sendControlChange(potCC[i], midiState[i], channel);
-          midiPState[i] = midiState[i];
-        }
-        potPState[i] = potState[i];
-      }
-    }
-    // =======================================================================================
-
-
-    // // =============================  READ THE PITCH/MOD WHEEL  ==============================
-    // mux3_ch(wheelStateButton);
-    // wheelState = !digitalRead(signal3);
-
-    // if (!wheelState) {
-    //   mod_wheel();
-    // } else {
-    //   pitch_wheel();
-    // }
-    // // =======================================================================================
-
-
-    // Sustain Pedal
-    //=========================================================
-    mux3_ch(sustainPin);
-    int susRead = !digitalRead(signal3);
-    int susState = map(susRead, 0, 1, 0, 127);
-
-    if (susState != susPrevState) {
-      MIDI.sendControlChange(64, susState, channel);
-      susPrevState = susState;
-      delay(5);
-    }
-    //==========================================================
-  }
-}
+#endif /* ARDUINO_USB_MODE */
