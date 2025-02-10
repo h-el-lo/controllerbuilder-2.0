@@ -4,25 +4,25 @@
 
 // =================== MUX VARIABLES  ======================
 // Mux 1 (Outputs (keys), KPS AND KPE (rows))
-int S10 = 15;
-int S11 = 14;
-int S12 = 16;
-int S13 = 10;
-const int signal = A0;
+#define S10 15
+#define S11 14
+#define S12 16
+#define S13 10
+#define signal A0
 
 // Mux 2 (Inputs (keys) (columns)) digital
-int S20 = 9;
-int S21 = 8;
-int S22 = 7;
-int S23 = 6;
-const int signal2 = A1;
+#define S20 9
+#define S21 8
+#define S22 7
+#define S23 6
+#define signal2 A1
 
 // Mux 3 (Analog input for Potentiometers and other control changes like damper pedal)
-int S30 = 5;
-int S31 = 4;
-int S32 = 3;
-int S33 = 2;
-const int signal3 = A2;
+#define S30 5
+#define S31 4
+#define S32 3
+#define S33 2
+#define signal3 A2
 // ===========================================================
 
 
@@ -82,7 +82,7 @@ int nums[ROW_NUM][COL_NUM] = {
 
 // Global Analog Input Variables
 const int N_ANALOGS = 5;
-int analogPins[N_ANALOGS] = { 0, 1, 2, 3, 4 }; // (Mux3 0 - 7) input_pullup
+int analogPins[N_ANALOGS] = { 0, 1, 2, 3, 4 };  // (Mux3 0 - 7) input_pullup
 
 // Potentiometer Variables
 const int N_POTS = 5;
@@ -212,7 +212,6 @@ void loop() {
         velocity = map(vel, vel_max, vel_min, 10, 127);
         noteOn(0, note, velocity);
         pressed[x][y] = 0;
-
       }
 
       if (not_ready[x][y]) {
@@ -303,7 +302,7 @@ void loop() {
   // Pitch Wheel (Joystick X)
   //=========================================================
   mux3_ch(pitchWheel);
-  int pitchReading = analogRead(signal3);;
+  int pitchReading = analogRead(signal3);
   pitchState = pitchReading;
   pitchMidiState = map(pitchReading, 1023, 0, 0, 16383);
 
@@ -390,5 +389,3 @@ int findIndex(int arr[], int size, int target) {
 
   return -1;  // Return =1 if the target is not found in the array.
 }
-
-
