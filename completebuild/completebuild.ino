@@ -121,8 +121,12 @@ const int POT_TIMEOUT = 300;
 unsigned long pPotTime[N_POTS] = { 0 };
 unsigned long potTimer[N_POTS] = { 0 };
 
+// Wheel Variables
+byte wheelPin = 5;         // Analog input reading of wheel
+int wheelStateButton = 6;  // This button causes the wheel to act, either as the pitch wheel or mod wheel.
+byte wheelState = 0;
+
 // Modulation Wheel Variables
-int modWheel = 5;  // JoyY (Mux3, ch5)
 int modReading = 0;
 int modMidiState = 0;
 int modMidiPState = 0;
@@ -130,9 +134,10 @@ int modState = 0;
 int modPrevState = 0;
 int modTimer = 0;
 int pModTime = 0;
+int modLockPin = 8;
+byte modLock = 0;
 
 // Pitch Wheel Variables
-int pitchWheel = 6;  // JoyX (Mux3, ch6)
 int pitchReading = 0;
 int pitchMidiState = 0;
 int pitchMidiPState = 0;
@@ -237,6 +242,7 @@ void loop() {
         vel = constrain(timing, vel_min, vel_max);
         velocity = map(vel, vel_max, vel_min, 10, 127);
         bNoteOn(0, note, velocity);
+        uNoteOn(0, note, velocity);
         pressed[x][y] = 0;
       }
 
@@ -255,6 +261,7 @@ void loop() {
         digitalWrite(signal1, HIGH);
         if (!kps[x][y] && !kpe[x][y]) {
           bNoteOff(0, note, velocity);
+          uNoteOff(0, note, velocity);
           not_ready[x][y] = 0;
         }
       }
@@ -282,6 +289,7 @@ void loop() {
     if (potTimer[i] < POT_TIMEOUT) {
       if (midiState[i] != midiPState[i]) {
         bControlChange(channel, potCC[i], midiState[i]);
+        uControlChange(channel, potCC[i], midiState[i]);
         midiPState[i] = midiState[i];
       }
       potPState[i] = potState[i];
@@ -290,61 +298,16 @@ void loop() {
   // ========================================================================================
 
 
-  // Modulation Wheel (Joystick Y)
-  // =========================================================
-  // The Modulation Wheel has to be written separately,
-  // because of the difference in the range of values
-  // - 127 to 127, precisely.
+  // // =============================  READ THE PITCH/MOD WHEEL  ==============================
+  // mux3_ch(wheelStateButton);
+  // wheelState = !digitalRead(signal3);
 
-  mux3_ch(modWheel);
-  int modReading = analogRead(signal3);
-  modState = modReading;
-  modMidiState = map(modReading, 0, 1023, -127, 127);
-  int modVar = abs(modState - modPrevState);
-
-  if (modVar > potThreshold) {
-    pModTime = millis();
-  }
-
-  modTimer = millis() - pModTime;
-
-  if (modTimer < POT_TIMEOUT) {
-    if (modMidiState != modMidiPState) {
-      if (modMidiState >= 0) {
-        // Send Modulation coarse (CC 1)
-        bControlChange(channel, 1, modMidiState);
-      } else {
-        // Send modulationm LSB fine/smooth (CC 33)
-        bControlChange(channel, 33, abs(modMidiState));
-      }
-      modMidiPState = modMidiState;
-    }
-    modPrevState = modState;
-  }
-  //==========================================================
-
-
-
-  // Pitch Wheel (Joystick X)
-  //=========================================================
-  mux3_ch(pitchWheel);
-  int pitchReading = analogRead(signal3);
-  ;
-  pitchState = pitchReading;
-  pitchMidiState = map(pitchReading, 1023, 0, 0, 16383);
-
-  int pitchVar = abs(pitchState - pitchPrevState);
-
-  if (pitchVar > pitchThreshold) {
-
-    if (pitchMidiState != pitchMidiPState) {
-      bPitchBend(channel, pitchMidiState);
-      pitchPrevState = pitchState;
-      // delay(5);
-    }
-    pitchMidiPState = pitchMidiState;
-  }
-  //==========================================================
+  // if (!wheelState) {
+  //   mod_wheel();
+  // } else {
+  //   pitch_wheel();
+  // }
+  // // =======================================================================================
 
 
   // Sustain Pedal
@@ -355,6 +318,7 @@ void loop() {
 
   if (susState != susPrevState) {
     bControlChange(channel, 64, susState);
+    uControlChange(channel, 64, susState);
     susPrevState = susState;
     // delay(5);
   }
@@ -417,6 +381,69 @@ void uControlChange(byte channel, byte control, byte value) {
 // a range of 0 - 16383 or -8192 to 8191. (2**14)
 void uPitchBend(int16_t value, int channel) {
   usbmidi.pitchBend(value, channel);
+}
+
+void mod_wheel() {
+
+  // The Modulation Wheel has to be written separately,
+  // because of the difference in the range of values
+  // - 127 to 127, precisely.
+  mux3_ch(modLockPin);
+  modLock = !digitalRead(signal3);
+
+  if (!modLock) {
+    if (wheelState) {
+      mux3_ch(wheelPin);
+      int modReading = analogRead(signal3);
+      modState = modReading;
+      modMidiState = map(modReading, 0, 1023, -127, 127);
+      int modVar = abs(modState - modPrevState);
+
+      if (modVar > potThreshold) {
+        pModTime = millis();
+      }
+
+      modTimer = millis() - pModTime;
+
+      if (modTimer < POT_TIMEOUT) {
+        if (modMidiState != modMidiPState) {
+          if (modMidiState >= 0) {
+            // Send Modulation coarse (CC 1)
+            bControlChange(1, modMidiState, channel);
+            uControlChange(1, modMidiState, channel);
+          } else {
+            // Send modulation LSB fine/smooth (CC 33)
+            bControlChange(33, abs(modMidiState), channel);
+            uControlChange(33, abs(modMidiState), channel);
+          }
+          modMidiPState = modMidiState;
+        }
+        modPrevState = modState;
+      }
+    }
+  }
+}
+
+void pitch_wheel() {
+
+  mux3_ch(wheelPin);
+  int pitchReading = analogRead(signal3);
+  ;
+  pitchState = pitchReading;
+  pitchMidiState = map(pitchReading, 1023, 0, 0, 16383);
+
+  int pitchVar = abs(pitchState - pitchPrevState);
+
+  if (pitchVar > pitchThreshold) {
+
+    if (pitchMidiState != pitchMidiPState) {
+      bPitchBend(pitchMidiState, channel);
+      uPitchBend(pitchMidiState, channel);
+      pitchPrevState = pitchState;
+      // delay(5);
+    }
+    pitchMidiPState = pitchMidiState;
+  }
 }
 
 #endif /* ARDUINO_USB_MODE */
