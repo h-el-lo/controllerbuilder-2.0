@@ -195,7 +195,7 @@ void loop() {
         // if change recorded in kps of note
         if (temp != pState[0][x][y]) {
           if (temp == 1) {
-            // begin a timer for the note, and re-record new state in 
+            // begin a timer for the note, and re-record new state in
             timer[0][x][y] = millis();
             kps[x][y] = 1;
             pState[0][x][y] = temp;
@@ -412,7 +412,11 @@ void uControlChange(byte channel, byte control, byte value) {
   usbmidi.controlChange(control, value, channel);
 }
 
-void uPitchBend(double value, int channel) {
+// The generic "int" or "byte" data types cannot be used here to represent values greater than 256 ()
+// this is because it comprises of just 8 bits, with a max possible permutation of 256 (2**8)
+// Thus, we must explicitly specicy to use the 16 bits variant (int16_t or uint16_t) to represent
+// a range of 0 - 16383 or -8192 to 8191. (2**14)
+void uPitchBend(int16_t value, int channel) {
   usbmidi.pitchBend(value, channel);
 }
 
