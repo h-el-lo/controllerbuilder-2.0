@@ -26,6 +26,9 @@ void loop() {}
 #define S11 14
 #define S12 16
 #define S13 10
+// The "signal" variable is renamed to "signal1" in the ESP version
+// This is because there is a keyword named "signal" in the "USB.h" library.
+// Proceeding to use this same word will cause a conflict.
 #define signal1 A0
 
 // Mux 2 (Inputs (keys) (columns)) digital
