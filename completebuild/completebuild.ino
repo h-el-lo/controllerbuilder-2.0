@@ -1,28 +1,33 @@
 // WORKING ALL KEYS NOTEON, NOTE OFF, VELOCITY SENSITIVE
-// ALL KEYS, 3 MUXS, PEDAL
-#include <MIDIUSB.h>
+// ALL KEYS, 3 MUXS, PEDAL#if ARDUINO_USB_MODE
+
+#include <BLEMIDI_Transport.h>
+#include <hardware/BLEMIDI_ESP32.h>
 
 // =================== MUX VARIABLES  ======================
 // Mux 1 (Outputs (keys), KPS AND KPE (rows))
-int S10 = 15;
-int S11 = 14;
-int S12 = 16;
-int S13 = 10;
-const int signal = A0;
+#define S10 15
+#define S11 14
+#define S12 16
+#define S13 10
+// The "signal" variable is renamed to "signal1" in the ESP version
+// This is because there is a keyword named "signal" in the "USB.h" library.
+// Proceeding to use this same word will cause a conflict.
+#define signal1 A0
 
 // Mux 2 (Inputs (keys) (columns)) digital
-int S20 = 9;
-int S21 = 8;
-int S22 = 7;
-int S23 = 6;
-const int signal2 = A1;
+#define S20 9
+#define S21 8
+#define S22 7
+#define S23 6
+#define signal2 A1
 
 // Mux 3 (Analog input for Potentiometers and other control changes like damper pedal)
-int S30 = 5;
-int S31 = 4;
-int S32 = 3;
-int S33 = 2;
-const int signal3 = A2;
+#define S30 5
+#define S31 4
+#define S32 3
+#define S33 2
+#define signal3 A2
 // ===========================================================
 
 
@@ -53,7 +58,7 @@ bool not_ready[ROW_NUM][COL_NUM] = { 0 };
 
 // TIMER VARIABLES
 unsigned long timer[2][ROW_NUM][COL_NUM] = { 0 };  // timer[2] for kps[x][y] and kpe[x][y]
-int time;
+int timing;
 //  ===========================================================================
 
 
@@ -75,6 +80,8 @@ int nums[ROW_NUM][COL_NUM] = {
   { 72, 73, 74, 75, 76, 77, 78, 79 },
   { 80, 81, 82, 83, 84, 85, 86, 87 },
 };
+
+BLEMIDI_CREATE_INSTANCE("Annihilō", MIDI);
 // ==========================================================
 
 
@@ -82,7 +89,7 @@ int nums[ROW_NUM][COL_NUM] = {
 
 // Global Analog Input Variables
 const int N_ANALOGS = 5;
-int analogPins[N_ANALOGS] = { 0, 1, 2, 3, 4 }; // (Mux3 0 - 7) input_pullup
+int analogPins[N_ANALOGS] = { 0, 1, 2, 3, 4 };  // (Mux3 0 - 7) input_pullup
 
 // Potentiometer Variables
 const int N_POTS = 5;
@@ -101,8 +108,12 @@ const int POT_TIMEOUT = 300;
 unsigned long pPotTime[N_POTS] = { 0 };
 unsigned long potTimer[N_POTS] = { 0 };
 
+// Wheel Variables
+byte wheelPin = 5;         // Analog input reading of wheel
+int wheelStateButton = 6;  // This button causes the wheel to act, either as the pitch wheel or mod wheel.
+byte wheelState = 0;
+
 // Modulation Wheel Variables
-int modWheel = 5;  // JoyY (Mux3, ch5)
 int modReading = 0;
 int modMidiState = 0;
 int modMidiPState = 0;
@@ -110,9 +121,10 @@ int modState = 0;
 int modPrevState = 0;
 int modTimer = 0;
 int pModTime = 0;
+int modLockPin = 8;
+byte modLock = 0;
 
 // Pitch Wheel Variables
-int pitchWheel = 6;  // JoyX (Mux3, ch6)
 int pitchReading = 0;
 int pitchMidiState = 0;
 int pitchMidiPState = 0;
@@ -133,8 +145,8 @@ void setup() {
   pinMode(S11, OUTPUT);
   pinMode(S12, OUTPUT);
   pinMode(S13, OUTPUT);
-  pinMode(signal, OUTPUT);
-  digitalWrite(signal, HIGH);
+  pinMode(signal1, OUTPUT);
+  digitalWrite(signal1, HIGH);
 
   pinMode(S20, OUTPUT);
   pinMode(S21, OUTPUT);
@@ -147,6 +159,8 @@ void setup() {
   pinMode(S32, OUTPUT);
   pinMode(S33, OUTPUT);
   pinMode(signal3, INPUT_PULLUP);
+
+  MIDI.begin();  // BLE MIDI INSTANCE
 }
 
 void loop() {
@@ -157,18 +171,20 @@ void loop() {
     for (int x = 0; x < ROW_NUM; x++) {
 
       note = nums[x][y];
-
+      // if the selected note "nums[x][y]" is ready to be pressed, i.e, !not_ready
       if (!not_ready[x][y]) {
 
         // Shift mux to Keypress-start (KPS) channel and read the digital input of note[x][y]
         mux_ch(KPS[x]);
-        digitalWrite(signal, LOW);
+        digitalWrite(signal1, LOW);
         mux2_ch(cols[y]);
         temp = !digitalRead(signal2);
-        digitalWrite(signal, HIGH);
+        digitalWrite(signal1, HIGH);
 
+        // if change recorded in kps of note
         if (temp != pState[0][x][y]) {
           if (temp == 1) {
+            // begin a timer for the note, and re-record new state in
             timer[0][x][y] = millis();
             kps[x][y] = 1;
             pState[0][x][y] = temp;
@@ -181,10 +197,10 @@ void loop() {
 
         // Shift mux to Keypress-end (KPE) channel and read the digital input of note[x][y]
         mux_ch(KPE[x]);
-        digitalWrite(signal, LOW);
+        digitalWrite(signal1, LOW);
         mux2_ch(cols[y]);
         temp = !digitalRead(signal2);
-        digitalWrite(signal, HIGH);
+        digitalWrite(signal1, HIGH);
 
         if (temp != pState[1][x][y]) {
           if (temp == 1) {
@@ -207,29 +223,28 @@ void loop() {
 
       // Sends a noteOn midi message when keypress is complete
       if (pressed[x][y]) {
-        time = abs(int(timer[1][x][y] - timer[0][x][y]));
-        vel = constrain(time, vel_min, vel_max);
+        timing = abs(int(timer[1][x][y] - timer[0][x][y]));
+        vel = constrain(timing, vel_min, vel_max);
         velocity = map(vel, vel_max, vel_min, 10, 127);
-        noteOn(0, note, velocity);
+        bNoteOn(0, note, velocity);
         pressed[x][y] = 0;
-
       }
 
       if (not_ready[x][y]) {
 
         mux_ch(KPS[x]);
-        digitalWrite(signal, LOW);
+        digitalWrite(signal1, LOW);
         mux2_ch(cols[y]);
         kps[x][y] = !digitalRead(signal2);
 
         mux_ch(KPE[x]);
-        digitalWrite(signal, LOW);
+        digitalWrite(signal1, LOW);
         mux2_ch(cols[y]);
         kpe[x][y] = !digitalRead(signal2);
 
-        digitalWrite(signal, HIGH);
+        digitalWrite(signal1, HIGH);
         if (!kps[x][y] && !kpe[x][y]) {
-          noteOff(0, note, velocity);
+          bNoteOff(0, note, velocity);
           not_ready[x][y] = 0;
         }
       }
@@ -256,7 +271,7 @@ void loop() {
 
     if (potTimer[i] < POT_TIMEOUT) {
       if (midiState[i] != midiPState[i]) {
-        controlChange(channel, potCC[i], midiState[i]);
+        bControlChange(channel, potCC[i], midiState[i]);
         midiPState[i] = midiState[i];
       }
       potPState[i] = potState[i];
@@ -265,60 +280,16 @@ void loop() {
   // ========================================================================================
 
 
-  // Modulation Wheel (Joystick Y)
-  // =========================================================
-  // The Modulation Wheel has to be written separately,
-  // because of the difference in the range of values
-  // - 127 to 127, precisely.
+  // // =============================  READ THE PITCH/MOD WHEEL  ==============================
+  // mux3_ch(wheelStateButton);
+  // wheelState = !digitalRead(signal3);
 
-  mux3_ch(modWheel);
-  int modReading = analogRead(signal3);
-  modState = modReading;
-  modMidiState = map(modReading, 0, 1023, -127, 127);
-  int modVar = abs(modState - modPrevState);
-
-  if (modVar > potThreshold) {
-    pModTime = millis();
-  }
-
-  modTimer = millis() - pModTime;
-
-  if (modTimer < POT_TIMEOUT) {
-    if (modMidiState != modMidiPState) {
-      if (modMidiState >= 0) {
-        // Send Modulation coarse (CC 1)
-        controlChange(channel, 1, modMidiState);
-      } else {
-        // Send modulationm LSB fine/smooth (CC 33)
-        controlChange(channel, 33, abs(modMidiState));
-      }
-      modMidiPState = modMidiState;
-    }
-    modPrevState = modState;
-  }
-  //==========================================================
-
-
-
-  // Pitch Wheel (Joystick X)
-  //=========================================================
-  mux3_ch(pitchWheel);
-  int pitchReading = analogRead(signal3);;
-  pitchState = pitchReading;
-  pitchMidiState = map(pitchReading, 1023, 0, 0, 16383);
-
-  int pitchVar = abs(pitchState - pitchPrevState);
-
-  if (pitchVar > pitchThreshold) {
-
-    if (pitchMidiState != pitchMidiPState) {
-      pitchBend(channel, pitchMidiState);
-      pitchPrevState = pitchState;
-      // delay(5);
-    }
-    pitchMidiPState = pitchMidiState;
-  }
-  //==========================================================
+  // if (!wheelState) {
+  //   mod_wheel();
+  // } else {
+  //   pitch_wheel();
+  // }
+  // // =======================================================================================
 
 
   // Sustain Pedal
@@ -328,9 +299,9 @@ void loop() {
   int susState = map(susRead, 0, 1, 0, 127);
 
   if (susState != susPrevState) {
-    controlChange(channel, 64, susState);
+    bControlChange(channel, 64, susState);
     susPrevState = susState;
-    delay(5);
+    // delay(5);
   }
   //==========================================================
 }
@@ -357,38 +328,79 @@ void mux3_ch(int channel) {
   digitalWrite(S33, (channel >> 3) & 0x01);
 }
 
-void noteOn(byte channel, byte note, byte velocity) {
-  midiEventPacket_t event = { 0x09, 0x90 | channel, note, velocity };
-  MidiUSB.sendMIDI(event);
-  MidiUSB.flush();
+void bNoteOn(byte channel, byte note, byte velocity) {
+  MIDI.sendNoteOn(note, velocity, channel);
 }
 
-void noteOff(byte channel, byte note, byte velocity) {
-  midiEventPacket_t noteOff = { 0x08, 0x80 | channel, note, velocity };
-  MidiUSB.sendMIDI(noteOff);
-  MidiUSB.flush();
+void bNoteOff(byte channel, byte note, byte velocity) {
+  MIDI.sendNoteOff(note, velocity, channel);
 }
 
-void controlChange(byte channel, byte control, byte value) {
-  midiEventPacket_t event = { 0x0B, 0xB0 | channel, control, value };
-  MidiUSB.sendMIDI(event);
-  MidiUSB.flush();
+void bControlChange(byte channel, byte control, byte value) {
+  MIDI.sendControlChange(control, value, channel);
 }
 
-void pitchBend(byte channel, int value) {
-  midiEventPacket_t pitchBend = { 0x0E, 0xE0 | channel, value & 0x7F, (value >> 7) & 0x7F };
-  MidiUSB.sendMIDI(pitchBend);
-  MidiUSB.flush();
+void bPitchBend(byte channel, int value) {
+  MIDI.sendPitchBend(value, channel);
 }
 
-int findIndex(int arr[], int size, int target) {
-  for (int i = 0; i < size; i++) {
-    if (arr[i] == target) {
-      return i;  // Return the index if a match is found.
+void mod_wheel() {
+
+  // The Modulation Wheel has to be written separately,
+  // because of the difference in the range of values
+  // - 127 to 127, precisely.
+  mux3_ch(modLockPin);
+  modLock = !digitalRead(signal3);
+
+  if (!modLock) {
+    if (wheelState) {
+      mux3_ch(wheelPin);
+      int modReading = analogRead(signal3);
+      modState = modReading;
+      modMidiState = map(modReading, 0, 1023, -127, 127);
+      int modVar = abs(modState - modPrevState);
+
+      if (modVar > potThreshold) {
+        pModTime = millis();
+      }
+
+      modTimer = millis() - pModTime;
+
+      if (modTimer < POT_TIMEOUT) {
+        if (modMidiState != modMidiPState) {
+          if (modMidiState >= 0) {
+            // Send Modulation coarse (CC 1)
+            bControlChange(1, modMidiState, channel);
+          } else {
+            // Send modulation LSB fine/smooth (CC 33)
+            bControlChange(33, abs(modMidiState), channel);
+
+            modMidiPState = modMidiState;
+          }
+          modPrevState = modState;
+        }
+      }
     }
   }
-
-  return -1;  // Return =1 if the target is not found in the array.
 }
 
+void pitch_wheel() {
 
+  mux3_ch(wheelPin);
+  int pitchReading = analogRead(signal3);
+  ;
+  pitchState = pitchReading;
+  pitchMidiState = map(pitchReading, 1023, 0, 0, 16383);
+
+  int pitchVar = abs(pitchState - pitchPrevState);
+
+  if (pitchVar > pitchThreshold) {
+
+    if (pitchMidiState != pitchMidiPState) {
+      bPitchBend(pitchMidiState, channel);
+      pitchPrevState = pitchState;
+      // delay(5);
+    }
+    pitchMidiPState = pitchMidiState;
+  }
+}
