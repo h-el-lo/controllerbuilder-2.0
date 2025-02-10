@@ -1,6 +1,11 @@
 // WORKING ALL KEYS NOTEON, NOTE OFF, VELOCITY SENSITIVE
 // ALL KEYS, 3 MUXS, PEDAL
-#include <MIDIUSB.h>
+#include <BLEMIDI_Transport.h>
+#include <hardware/BLEMIDI_ESP32.h>
+
+#include "USB.h"
+#include "USBMIDI.h"
+
 
 // =================== MUX VARIABLES  ======================
 // Mux 1 (Outputs (keys), KPS AND KPE (rows))
@@ -75,6 +80,9 @@ int nums[ROW_NUM][COL_NUM] = {
   { 72, 73, 74, 75, 76, 77, 78, 79 },
   { 80, 81, 82, 83, 84, 85, 86, 87 },
 };
+
+BLEMIDI_CREATE_INSTANCE("Annihilō", MIDI);
+USBMIDI usbmidi;
 // ==========================================================
 
 
@@ -82,7 +90,7 @@ int nums[ROW_NUM][COL_NUM] = {
 
 // Global Analog Input Variables
 const int N_ANALOGS = 5;
-int analogPins[N_ANALOGS] = { 0, 1, 2, 3, 4 }; // (Mux3 0 - 7) input_pullup
+int analogPins[N_ANALOGS] = { 0, 1, 2, 3, 4 };  // (Mux3 0 - 7) input_pullup
 
 // Potentiometer Variables
 const int N_POTS = 5;
@@ -147,6 +155,10 @@ void setup() {
   pinMode(S32, OUTPUT);
   pinMode(S33, OUTPUT);
   pinMode(signal3, INPUT_PULLUP);
+
+  MIDI.begin();  // BLE MIDI INSTANCE
+  USB.begin();
+  usbmidi.begin();  // USB MIDI INSTANCE
 }
 
 void loop() {
@@ -210,9 +222,8 @@ void loop() {
         time = abs(int(timer[1][x][y] - timer[0][x][y]));
         vel = constrain(time, vel_min, vel_max);
         velocity = map(vel, vel_max, vel_min, 10, 127);
-        noteOn(0, note, velocity);
+        bNoteOn(0, note, velocity);
         pressed[x][y] = 0;
-
       }
 
       if (not_ready[x][y]) {
@@ -229,7 +240,7 @@ void loop() {
 
         digitalWrite(signal, HIGH);
         if (!kps[x][y] && !kpe[x][y]) {
-          noteOff(0, note, velocity);
+          bNoteOff(0, note, velocity);
           not_ready[x][y] = 0;
         }
       }
@@ -256,7 +267,7 @@ void loop() {
 
     if (potTimer[i] < POT_TIMEOUT) {
       if (midiState[i] != midiPState[i]) {
-        controlChange(channel, potCC[i], midiState[i]);
+        bControlChange(channel, potCC[i], midiState[i]);
         midiPState[i] = midiState[i];
       }
       potPState[i] = potState[i];
@@ -287,10 +298,10 @@ void loop() {
     if (modMidiState != modMidiPState) {
       if (modMidiState >= 0) {
         // Send Modulation coarse (CC 1)
-        controlChange(channel, 1, modMidiState);
+        bControlChange(channel, 1, modMidiState);
       } else {
         // Send modulationm LSB fine/smooth (CC 33)
-        controlChange(channel, 33, abs(modMidiState));
+        bControlChange(channel, 33, abs(modMidiState));
       }
       modMidiPState = modMidiState;
     }
@@ -303,7 +314,8 @@ void loop() {
   // Pitch Wheel (Joystick X)
   //=========================================================
   mux3_ch(pitchWheel);
-  int pitchReading = analogRead(signal3);;
+  int pitchReading = analogRead(signal3);
+  ;
   pitchState = pitchReading;
   pitchMidiState = map(pitchReading, 1023, 0, 0, 16383);
 
@@ -312,7 +324,7 @@ void loop() {
   if (pitchVar > pitchThreshold) {
 
     if (pitchMidiState != pitchMidiPState) {
-      pitchBend(channel, pitchMidiState);
+      bPitchBend(channel, pitchMidiState);
       pitchPrevState = pitchState;
       // delay(5);
     }
@@ -328,7 +340,7 @@ void loop() {
   int susState = map(susRead, 0, 1, 0, 127);
 
   if (susState != susPrevState) {
-    controlChange(channel, 64, susState);
+    bControlChange(channel, 64, susState);
     susPrevState = susState;
     delay(5);
   }
@@ -357,38 +369,26 @@ void mux3_ch(int channel) {
   digitalWrite(S33, (channel >> 3) & 0x01);
 }
 
-void noteOn(byte channel, byte note, byte velocity) {
-  midiEventPacket_t event = { 0x09, 0x90 | channel, note, velocity };
-  MidiUSB.sendMIDI(event);
-  MidiUSB.flush();
+void bNoteOn(byte channel, byte note, byte velocity) {
+  MIDI.sendNoteOn(note, velocity, channel);
 }
 
-void noteOff(byte channel, byte note, byte velocity) {
-  midiEventPacket_t noteOff = { 0x08, 0x80 | channel, note, velocity };
-  MidiUSB.sendMIDI(noteOff);
-  MidiUSB.flush();
+void bNoteOff(byte channel, byte note, byte velocity) {
+  MIDI.sendNoteOff(note, velocity, channel);
 }
 
-void controlChange(byte channel, byte control, byte value) {
-  midiEventPacket_t event = { 0x0B, 0xB0 | channel, control, value };
-  MidiUSB.sendMIDI(event);
-  MidiUSB.flush();
+void bControlChange(byte channel, byte control, byte value) {
+  MIDI.sendControlChange(control, value, channel);
 }
 
-void pitchBend(byte channel, int value) {
-  midiEventPacket_t pitchBend = { 0x0E, 0xE0 | channel, value & 0x7F, (value >> 7) & 0x7F };
-  MidiUSB.sendMIDI(pitchBend);
-  MidiUSB.flush();
+void bPitchBend(byte channel, int value) {
+  MIDI.sendPitchBend(value, channel);
 }
 
-int findIndex(int arr[], int size, int target) {
-  for (int i = 0; i < size; i++) {
-    if (arr[i] == target) {
-      return i;  // Return the index if a match is found.
-    }
-  }
-
-  return -1;  // Return =1 if the target is not found in the array.
+void uNoteOn(byte channel, byte note, byte velocity) {
+  usbmidi.NoteOn(note, velocity, channel);
 }
 
-
+void uNoteOff(byte channel, byte note, byte velocity) {
+  usbmidi.noteOff(note, velocity, channel);
+}
