@@ -1,6 +1,7 @@
 // WORKING ALL KEYS NOTEON, NOTE OFF, VELOCITY SENSITIVE
 // ALL KEYS, 3 MUXS, PEDAL#if ARDUINO_USB_MODE
 
+#if ARDUINO_USB_MODE
 #warning This sketch should be used when USB is in OTG mode
 
 void setup() {}
