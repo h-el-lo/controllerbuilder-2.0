@@ -1,3 +1,16 @@
+#if ARDUINO_USB_MODE
+
+#warning This sketch should be used when USB is in OTG mode
+
+void setup() {}
+void loop() {}
+
+#else
+// Possible project needs
+// voltage sensor, usbc female, 18650 charging module with 5v output
+// possibly 3v3 regulator
+
+
 // WORKING ALL KEYS NOTEON, NOTE OFF, VELOCITY SENSITIVE
 // ALL KEYS, 3 MUXS, PEDAL
 #include <BLEMIDI_Transport.h>
@@ -9,25 +22,25 @@
 
 // =================== MUX VARIABLES  ======================
 // Mux 1 (Outputs (keys), KPS AND KPE (rows))
-int S10 = 15;
-int S11 = 14;
-int S12 = 16;
-int S13 = 10;
-const int signal = A0;
+#define S10 15
+#define S11 14
+#define S12 16
+#define S13 10
+#define signal1 A0
 
 // Mux 2 (Inputs (keys) (columns)) digital
-int S20 = 9;
-int S21 = 8;
-int S22 = 7;
-int S23 = 6;
-const int signal2 = A1;
+#define S20 9
+#define S21 8
+#define S22 7
+#define S23 6
+#define signal2 A1
 
 // Mux 3 (Analog input for Potentiometers and other control changes like damper pedal)
-int S30 = 5;
-int S31 = 4;
-int S32 = 3;
-int S33 = 2;
-const int signal3 = A2;
+#define S30 5
+#define S31 4
+#define S32 3
+#define S33 2
+#define signal3 A2
 // ===========================================================
 
 
@@ -58,7 +71,7 @@ bool not_ready[ROW_NUM][COL_NUM] = { 0 };
 
 // TIMER VARIABLES
 unsigned long timer[2][ROW_NUM][COL_NUM] = { 0 };  // timer[2] for kps[x][y] and kpe[x][y]
-int time;
+int timing;
 //  ===========================================================================
 
 
@@ -141,8 +154,8 @@ void setup() {
   pinMode(S11, OUTPUT);
   pinMode(S12, OUTPUT);
   pinMode(S13, OUTPUT);
-  pinMode(signal, OUTPUT);
-  digitalWrite(signal, HIGH);
+  pinMode(signal1, OUTPUT);
+  digitalWrite(signal1, HIGH);
 
   pinMode(S20, OUTPUT);
   pinMode(S21, OUTPUT);
@@ -169,18 +182,20 @@ void loop() {
     for (int x = 0; x < ROW_NUM; x++) {
 
       note = nums[x][y];
-
+      // if the selected note "nums[x][y]" is ready to be pressed, i.e, !not_ready
       if (!not_ready[x][y]) {
 
         // Shift mux to Keypress-start (KPS) channel and read the digital input of note[x][y]
         mux_ch(KPS[x]);
-        digitalWrite(signal, LOW);
+        digitalWrite(signal1, LOW);
         mux2_ch(cols[y]);
         temp = !digitalRead(signal2);
-        digitalWrite(signal, HIGH);
+        digitalWrite(signal1, HIGH);
 
+        // if change recorded in kps of note
         if (temp != pState[0][x][y]) {
           if (temp == 1) {
+            // begin a timer for the note, and re-record new state in 
             timer[0][x][y] = millis();
             kps[x][y] = 1;
             pState[0][x][y] = temp;
@@ -193,10 +208,10 @@ void loop() {
 
         // Shift mux to Keypress-end (KPE) channel and read the digital input of note[x][y]
         mux_ch(KPE[x]);
-        digitalWrite(signal, LOW);
+        digitalWrite(signal1, LOW);
         mux2_ch(cols[y]);
         temp = !digitalRead(signal2);
-        digitalWrite(signal, HIGH);
+        digitalWrite(signal1, HIGH);
 
         if (temp != pState[1][x][y]) {
           if (temp == 1) {
@@ -219,8 +234,8 @@ void loop() {
 
       // Sends a noteOn midi message when keypress is complete
       if (pressed[x][y]) {
-        time = abs(int(timer[1][x][y] - timer[0][x][y]));
-        vel = constrain(time, vel_min, vel_max);
+        timing = abs(int(timer[1][x][y] - timer[0][x][y]));
+        vel = constrain(timing, vel_min, vel_max);
         velocity = map(vel, vel_max, vel_min, 10, 127);
         bNoteOn(0, note, velocity);
         pressed[x][y] = 0;
@@ -229,16 +244,16 @@ void loop() {
       if (not_ready[x][y]) {
 
         mux_ch(KPS[x]);
-        digitalWrite(signal, LOW);
+        digitalWrite(signal1, LOW);
         mux2_ch(cols[y]);
         kps[x][y] = !digitalRead(signal2);
 
         mux_ch(KPE[x]);
-        digitalWrite(signal, LOW);
+        digitalWrite(signal1, LOW);
         mux2_ch(cols[y]);
         kpe[x][y] = !digitalRead(signal2);
 
-        digitalWrite(signal, HIGH);
+        digitalWrite(signal1, HIGH);
         if (!kps[x][y] && !kpe[x][y]) {
           bNoteOff(0, note, velocity);
           not_ready[x][y] = 0;
@@ -342,7 +357,7 @@ void loop() {
   if (susState != susPrevState) {
     bControlChange(channel, 64, susState);
     susPrevState = susState;
-    delay(5);
+    // delay(5);
   }
   //==========================================================
 }
@@ -386,9 +401,19 @@ void bPitchBend(byte channel, int value) {
 }
 
 void uNoteOn(byte channel, byte note, byte velocity) {
-  usbmidi.NoteOn(note, velocity, channel);
+  usbmidi.noteOn(note, velocity, channel);
 }
 
 void uNoteOff(byte channel, byte note, byte velocity) {
   usbmidi.noteOff(note, velocity, channel);
 }
+
+void uControlChange(byte channel, byte control, byte value) {
+  usbmidi.controlChange(control, value, channel);
+}
+
+void uPitchBend(double value, int channel) {
+  usbmidi.pitchBend(value, channel);
+}
+
+#endif /* ARDUINO_USB_MODE */
