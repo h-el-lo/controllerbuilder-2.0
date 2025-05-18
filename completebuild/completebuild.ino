@@ -12,6 +12,21 @@ void loop() {}
 #include "USB.h"
 #include "USBMIDI.h"
 
+// ================= ONBOARD RGB VARIABLES ==================
+// The fade effect without the delay function (using "RGB_timer" and "micros()")
+
+int timeon = 438;  // milliseconds (Very similar to Synthage)
+int timeoff = 0;   // milliseconds
+int steps = 240; // 240 frames in less than a second
+int r = 255;
+int g = 52;
+int b = 25;
+unsigned long RGB_timer = 0;
+int threshold = (timeon * 1000) / steps;
+int RGB_count = 0;
+int stage = 1;
+// ==========================================================
+
 
 // =================== MUX VARIABLES  ======================
 // Mux 1 (Outputs (keys), KPS AND KPE (rows))
@@ -174,6 +189,8 @@ void setup() {
 }
 
 void loop() {
+  // ==============================  PERFORM RGB LIGHTING  ===============================
+  linear_stepper_forward_backward(r, g, b, steps, timeon, timeoff);
 
   // ==============================  READ THROUGH THE KEYS  ===============================
   for (int y = 0; y < COL_NUM; y++) {
@@ -415,6 +432,86 @@ void pitch_wheel() {
       // delay(5);
     }
     pitchMidiPState = pitchMidiState;
+  }
+}
+
+void linear_stepper_forward(int r, int g, int b, int steps, int timeon, int timeoff) {
+
+  if (RGB_count <= steps) {
+    if (micros() - RGB_timer >= threshold) {
+      rgbLedWrite(RGB_BUILTIN, ((r * RGB_count) / steps), ((g * RGB_count) / steps), ((b * RGB_count) / steps));
+      RGB_timer = micros();
+      RGB_count += 1;
+    }
+  }
+
+  if (RGB_count == steps) {
+    RGB_count = 0;
+  }
+}
+
+void linear_stepper_backward(int r, int g, int b, int steps, int timeon, int timeoff) {
+
+  if (RGB_count <= steps) {
+    if (micros() - RGB_timer >= threshold) {
+      rgbLedWrite(RGB_BUILTIN, ((r * (steps - RGB_count)) / steps), ((g * (steps - RGB_count)) / steps), ((b * (steps - RGB_count)) / steps));
+      RGB_timer = micros();
+      RGB_count += 1;
+    }
+  }
+
+  if (RGB_count == steps) {
+    RGB_count = 0;
+  }
+}
+
+void linear_stepper_forward_backward(int r, int g, int b, int steps, int timeon, int timeoff) {
+  // This pattern is in four stages, increment, hold, decrement, hold.
+
+  if (stage == 1) {
+
+    if (RGB_count <= steps) {
+      if (micros() - RGB_timer >= threshold) {
+        rgbLedWrite(RGB_BUILTIN, ((r * RGB_count) / steps), ((g * RGB_count) / steps), ((b * RGB_count) / steps));
+        RGB_timer = micros();
+        RGB_count += 1;
+      }
+    }
+
+    if (RGB_count == steps) {
+      RGB_count = 0;
+      rgbLedWrite(RGB_BUILTIN, r, g, b);
+      RGB_timer = micros();  // Reset the RGB_timer variable
+      stage = 2;
+    }
+
+
+  } else if (stage == 2) {
+    if (micros() - RGB_timer >= timeoff * 1000) {
+      stage = 3;
+    }
+
+  } else if (stage == 3) {
+
+    if (RGB_count <= steps) {
+      if (micros() - RGB_timer >= threshold) {
+        rgbLedWrite(RGB_BUILTIN, ((r * (steps - RGB_count)) / steps), ((g * (steps - RGB_count)) / steps), ((b * (steps - RGB_count)) / steps));
+        RGB_timer = micros();
+        RGB_count += 1;
+      }
+    }
+
+    if (RGB_count == steps) {
+      RGB_count = 0;
+      rgbLedWrite(RGB_BUILTIN, 0, 0, 0);
+      RGB_timer = micros();  // Reset the RGB_timer variable
+      stage = 4;
+    }
+
+  } else if (stage == 4) {
+    if (micros() - RGB_timer >= timeoff * 1000) {
+      stage = 1;
+    }
   }
 }
 
