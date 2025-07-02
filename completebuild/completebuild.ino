@@ -17,8 +17,23 @@ void loop() {}
 
 int r, g, b;
 
+int Synthage_default[12][3] = {
+  { 51, 86, 255 },   // Color 1 - LightBlue // Done
+  { 0, 0, 100 },     // Color 2 - Blue // Done
+  { 101, 0, 205 },   // Color 3 - Indigo/Purple // Done
+  { 80, 0, 87 },     // Color 4 - Violet // Done
+  { 195, 0, 60 },    // Color 5 - Magenta // Done
+  { 50, 3, 0 },      // Color 6 - Red // Done
+  { 245, 65, 2 },    // Color 7 - Orange // Done
+  { 255, 190, 0 },   // Color 8 - Yellow // Done
+  { 180, 255, 0 },   // Color 9 - Lawn Green // Done
+  { 120, 255, 0 },   // Color 10 - Green // Done
+  { 72, 255, 51 },   // Color 11- Mint Green // Done
+  { 75, 155, 214 },  // Color 12 - Cyan Done // Done
+};
+
 // Animation variables (Very similar to Synthage)
-int timeon = 438;  // milliseconds
+int timeon = 435;  // milliseconds
 int timeoff = 0;   // milliseconds
 int steps = 240;   // 240 frames in about a second
 unsigned long RGB_timer = 0;
@@ -166,10 +181,22 @@ int susPrevState = 0;
 void setup() {
   // Set RGB color
   // Synthage default colors
-  // rgb(255, 2, 50); // Color 5 - Pink
-  
-  rgb(255, 2, 25);
-  
+  // rgb(0, 86, 255); // Color 1 - LightBlue
+  rgb(25, 75, 214); // Color 1 - LightBlue
+  // rgb(0, 0, 100);  // Color 2 - Blue // Done
+  // rgb(101, 0, 205); // Color 3 - Indigo/Purple
+  // rgb(15, 0, 50); // Color 3 - Indigo/Purple
+  // rgb(80, 0, 87); // Color 4 - Violet // Done
+  // rgb(195, 0, 60); // Color 5 - Magenta // Done
+  // rgb(50, 3, 0); // Color 6 - Red // Done
+  // rgb(245, 65, 2); // Color 7 - Orange // Done
+  // rgb(255, 190, 0); // Color 8 - Yellow // Done
+  // rgb(180, 255, 0); // Color 9 - Lawn Green // Done
+  // rgb(120, 255, 0); // Color 10 - Green // Done
+  // rgb(72, 255, 51);  // Color 11- Mint Green // Done
+  // rgb(75, 155, 214);  // Color 12 - Cyan // Done
+
+  // 90, 190, 255
 
   // Configure multiplexer I/O pins
   pinMode(S10, OUTPUT);
